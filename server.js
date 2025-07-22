@@ -114,7 +114,6 @@ io.on('connection', (socket) => {
             },
             turn: 1, // El Jugador 1 comienza
             lastMove: null // Almacenar el último movimiento para la verificación de victoria
-            // REMOVIDO: Ya no necesitamos el estado 'status' aquí
         };
 
         // Asociar el gameId a ambos sockets para fácil referencia
@@ -151,9 +150,6 @@ io.on('connection', (socket) => {
                 return;
             }
 
-            // REMOVIDO: Ya no necesitamos verificar game.status === 'gameOver' aquí
-            // porque el juego se eliminará al desconectarse un jugador.
-
             const { col, player } = data;
 
             // Verificar que sea el turno del jugador que envía el movimiento
@@ -181,13 +177,11 @@ io.on('connection', (socket) => {
             // Verificar si hay un ganador
             if (checkWin(game.board, player, game.lastMove)) {
                 console.log(`Jugador ${player} ganó el juego ${gameId}`);
-                // REMOVIDO: Ya no marcamos status: 'gameOver'
                 io.to(game.players[1]).emit('game_over', { board: game.board, winner: player });
                 io.to(game.players[2]).emit('game_over', { board: game.board, winner: player });
                 // El juego se eliminará cuando un jugador se desconecte (recargue la página)
             } else if (isBoardFull(game.board)) {
                 console.log(`Juego ${gameId} terminó en empate.`);
-                // REMOVIDO: Ya no marcamos status: 'gameOver'
                 io.to(game.players[1]).emit('game_over', { board: game.board, winner: null }); // Empate
                 io.to(game.players[2]).emit('game_over', { board: game.board, winner: null }); // Empate
                 // El juego se eliminará cuando un jugador se desconecte (recargue la página)
@@ -205,16 +199,7 @@ io.on('connection', (socket) => {
     });
 
     // REMOVIDO: Ya no necesitamos el manejador 'request_restart'
-    /*
-    socket.on('request_restart', () => {
-        try {
-            // ... (toda la lógica de reinicio eliminada)
-        } catch (error) {
-            console.error(`Error en request_restart para socket ${socket.id}:`, error);
-            socket.emit('server_error', 'Ocurrió un error en el servidor al intentar reiniciar el juego.');
-        }
-    });
-    */
+    // socket.on('request_restart', () => { ... });
 
     // Manejar la desconexión del usuario
     socket.on('disconnect', () => {
