@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cuatro en Línea</title>
+    <!-- Tailwind CSS CDN para un estilo rápido y responsivo -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Fuente Inter para una mejor legibilidad -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f2f5; /* Fondo gris claro */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+        }
+        .game-container {
+            background-color: #ffffff; /* Fondo blanco para el contenedor del juego */
+            border-radius: 1.5rem; /* Bordes más redondeados */
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); /* Sombra más pronunciada */
+            padding: 2rem;
+            max-width: 90%;
+            width: 600px; /* Ancho fijo para el contenedor del juego */
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .board {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr); /* 7 columnas */
+            grid-template-rows: repeat(6, 1fr); /* 6 filas */
+            gap: 0.5rem; /* Espacio entre las celdas */
+            background-color: #4a90e2; /* Azul vibrante para el tablero */
+            border-radius: 0.75rem;
+            padding: 1rem;
+            width: 100%;
+            aspect-ratio: 7 / 6; /* Mantener la proporción del tablero */
+        }
+        .cell {
+            width: 100%;
+            height: 100%;
+            background-color: #1a1a1a; /* Agujeros negros */
+            border-radius: 50%; /* Círculos perfectos */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer; /* Indica que es clickeable */
+            transition: background-color 0.3s ease; /* Transición suave para el hover */
+        }
+        .cell:hover {
+            background-color: #333333; /* Oscurecer al pasar el ratón */
+        }
+        .cell.player1 {
+            background-color: #e74c3c; /* Rojo para el Jugador 1 */
+        }
+        .cell.player2 {
+            background-color: #f1c40f; /* Amarillo para el Jugador 2 */
+        }
+        .status-message {
+            margin-top: 1.5rem;
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #333;
+            text-align: center;
+        }
+        .player-info {
+            margin-bottom: 1.5rem;
+            font-size: 1rem;
+            color: #555;
+            text-align: center;
+        }
+        .reset-button {
+            margin-top: 2rem;
+            padding: 0.75rem 2rem;
+            background-color: #28a745; /* Verde para el botón de reinicio */
+            color: white;
+            border: none;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 600;
+            transition: background-color 0.3s ease, transform 0.1s ease;
+        }
+        .reset-button:hover {
+            background-color: #218838;
+            transform: translateY(-2px);
+        }
+        .reset-button:active {
+            transform: translateY(0);
+        }
+        @media (max-width: 640px) {
+            .game-container {
+                padding: 1rem;
+                width: 100%;
+            }
+            .board {
+                gap: 0.25rem;
+                padding: 0.5rem;
+            }
+            .status-message {
+                font-size: 1rem;
+            }
+            .player-info {
+                font-size: 0.9rem;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen p-4">
+<div class="game-container">
+    <h1 class="text-4xl font-bold text-gray-800 mb-6">Cuatro en Línea</h1>
+    <p id="player-info" class="player-info">Esperando jugador...</p>
+    <div id="game-board" class="board">
+        <!-- Las celdas del tablero se generarán con JavaScript -->
+    </div>
+    <p id="status-message" class="status-message">Conectando al servidor...</p>
+    <button id="reset-button" class="reset-button hidden">Reiniciar Juego</button>
+</div>
+
+<!-- Socket.IO client library -->
+<script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+<script>
+    // Configuración de la conexión WebSocket
+    // Asegúrate de reemplazar 'http://localhost:3000' con la IP pública de tu instancia EC2
+    // y el puerto que estés utilizando (ej: 'http://tu-ip-ec2:3000')
+    const socket = io('http://localhost:3000'); // ¡IMPORTANTE! Cambia esto a la IP de tu EC2
+
+    const gameBoard = document.getElementById('game-board');
+    const statusMessage = document.getElementById('status-message');
+    const playerInfo = document.getElementById('player-info');
+    const resetButton = document.getElementById('reset-button');
+
+    let playerNumber = null; // 1 or 2
+    let currentPlayerTurn = null; // 1 or 2
+    let gameActive = false;
+    let board = []; // Representación local del tablero
+
+    const ROWS = 6;
+    const COLS = 7;
+
+    // Función para inicializar el tablero visualmente
+    function initBoard() {
+        gameBoard.innerHTML = ''; // Limpiar tablero existente
+        board = Array(ROWS).fill(null).map(() => Array(COLS).fill(0)); // 0: empty, 1: player1, 2: player2
+
+        for (let r = 0; r < ROWS; r++) {
+            for (let c = 0; c < COLS; c++) {
+                const cell = document.createElement('div');
+                cell.classList.add('cell');
+                cell.dataset.row = r;
+                cell.dataset.col = c;
+                cell.addEventListener('click', () => handleCellClick(c));
+                gameBoard.appendChild(cell);
+            }
+        }
+        resetButton.classList.add('hidden'); // Ocultar el botón de reinicio al inicio
+    }
+
+    // Manejar el click en una columna
+    function handleCellClick(col) {
+        if (!gameActive || currentPlayerTurn !== playerNumber) {
+            statusMessage.textContent = "No es tu turno o el juego no está activo.";
+            return;
+        }
+        socket.emit('make_move', { col: col, player: playerNumber });
+    }
+
+    // Actualizar el tablero visualmente
+    function updateBoardUI(newBoard) {
+        board = newBoard;
+        const cells = gameBoard.children;
+        for (let r = 0; r < ROWS; r++) {
+            for (let c = 0; c < COLS; c++) {
+                const cellIndex = r * COLS + c;
+                const cellElement = cells[cellIndex];
+                cellElement.classList.remove('player1', 'player2');
+                if (board[r][c] === 1) {
+                    cellElement.classList.add('player1');
+                } else if (board[r][c] === 2) {
+                    cellElement.classList.add('player2');
+                }
+            }
+        }
+    }
+
+    // --- Eventos de Socket.IO ---
+
+    socket.on('connect', () => {
+        statusMessage.textContent = 'Conectado al servidor. Esperando un oponente...';
+        playerInfo.textContent = 'Tu ID de Socket: ' + socket.id;
+        initBoard(); // Asegurarse de que el tablero esté inicializado al conectar
+    });
+
+    socket.on('game_start', (data) => {
+        playerNumber = data.playerNumber;
+        currentPlayerTurn = data.startingPlayer;
+        gameActive = true;
+        playerInfo.textContent = `Eres el Jugador ${playerNumber}. Tu ficha es ${playerNumber === 1 ? 'Roja' : 'Amarilla'}.`;
+        statusMessage.textContent = `¡Juego iniciado! Es el turno del Jugador ${currentPlayerTurn}.`;
+        updateBoardUI(data.board); // Sincronizar el tablero inicial
+    });
+
+    socket.on('move_made', (data) => {
+        updateBoardUI(data.board);
+        currentPlayerTurn = data.nextPlayer;
+        statusMessage.textContent = `Es el turno del Jugador ${currentPlayerTurn}.`;
+    });
+
+    socket.on('game_over', (data) => {
+        gameActive = false;
+        updateBoardUI(data.board);
+        if (data.winner) {
+            statusMessage.textContent = `¡Juego terminado! El Jugador ${data.winner} ha ganado.`;
+        } else {
+            statusMessage.textContent = `¡Juego terminado! Es un empate.`;
+        }
+        resetButton.classList.remove('hidden'); // Mostrar el botón de reinicio
+    });
+
+    socket.on('invalid_move', (message) => {
+        statusMessage.textContent = `Movimiento inválido: ${message}`;
+    });
+
+    socket.on('opponent_disconnected', () => {
+        gameActive = false;
+        statusMessage.textContent = 'Tu oponente se ha desconectado. El juego ha terminado.';
+        playerInfo.textContent = 'Esperando un nuevo oponente...';
+        resetButton.classList.remove('hidden');
+    });
+
+    socket.on('disconnect', () => {
+        gameActive = false;
+        statusMessage.textContent = 'Desconectado del servidor. Reconectando...';
+        playerInfo.textContent = '';
+    });
+
+    // Manejar el reinicio del juego
+    resetButton.addEventListener('click', () => {
+        socket.emit('request_restart');
+        statusMessage.textContent = 'Solicitando reinicio del juego...';
+        resetButton.classList.add('hidden');
+    });
+
+    socket.on('restart_game', (data) => {
+        playerNumber = data.playerNumber; // Reasignar número de jugador si cambia
+        currentPlayerTurn = data.startingPlayer;
+        gameActive = true;
+        playerInfo.textContent = `Eres el Jugador ${playerNumber}. Tu ficha es ${playerNumber === 1 ? 'Roja' : 'Amarilla'}.`;
+        statusMessage.textContent = `¡Juego reiniciado! Es el turno del Jugador ${currentPlayerTurn}.`;
+        updateBoardUI(data.board);
+        resetButton.classList.add('hidden');
+    });
+
+    // Inicializar el tablero al cargar la página
+    initBoard();
+</script>
+</body>
+</html>
