@@ -1,4 +1,4 @@
-// server.js (Para ejecutar en tu instancia EC2)
+// server.js (Para ejecutar en instancia EC2)
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -7,7 +7,9 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
-    origin: "*",
+        // Permite conexiones desde cualquier origen.
+        // En un entorno de producción, deberías restringir esto a la URL de tu bucket S3.
+        origin: "*",
         methods: ["GET", "POST"]
     }
 });
@@ -176,13 +178,11 @@ io.on('connection', (socket) => {
             if (checkWin(game.board, player, game.lastMove)) {
                 console.log(`Jugador ${player} ganó el juego ${gameId}`);
                 io.to(game.players[1]).emit('game_over', { board: game.board, winner: player });
-                io.to(game.players[2]).emit('game_over', { board: game.board, winner: player });
-                // El juego se eliminará cuando un jugador se desconecte (recargue la página)
+                io.to(game.players[2]).emit('game_over', { board: game.board, winner: null }); // Empate
             } else if (isBoardFull(game.board)) {
                 console.log(`Juego ${gameId} terminó en empate.`);
                 io.to(game.players[1]).emit('game_over', { board: game.board, winner: null }); // Empate
                 io.to(game.players[2]).emit('game_over', { board: game.board, winner: null }); // Empate
-                // El juego se eliminará cuando un jugador se desconecte (recargue la página)
             } else {
                 // Cambiar el turno
                 game.turn = (player === 1) ? 2 : 1;
@@ -195,7 +195,6 @@ io.on('connection', (socket) => {
             socket.emit('server_error', 'Ocurrió un error en el servidor al realizar el movimiento.');
         }
     });
-
 
     // Manejar la desconexión del usuario
     socket.on('disconnect', () => {
@@ -215,7 +214,7 @@ io.on('connection', (socket) => {
                 io.to(opponentSocketId).emit('opponent_disconnected');
                 console.log(`Oponente ${socket.id} desconectado en el juego ${gameId}. Notificando a ${opponentSocketId}.`);
             }
-            // Ahora sí eliminamos el juego solo cuando un jugador se desconecta
+            // Eliminar el juego cuando un jugador se desconecta
             delete activeGames[gameId];
             console.log(`Juego ${gameId} eliminado debido a desconexión.`);
         }
