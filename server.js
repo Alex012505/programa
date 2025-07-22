@@ -7,9 +7,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
-        // Permite conexiones desde cualquier origen.
-        // En un entorno de producción, deberías restringir esto a la URL de tu bucket S3.
-        origin: "*",
+    origin: "*",
         methods: ["GET", "POST"]
     }
 });
@@ -198,8 +196,6 @@ io.on('connection', (socket) => {
         }
     });
 
-    // REMOVIDO: Ya no necesitamos el manejador 'request_restart'
-    // socket.on('request_restart', () => { ... });
 
     // Manejar la desconexión del usuario
     socket.on('disconnect', () => {
