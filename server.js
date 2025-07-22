@@ -1,4 +1,4 @@
-// server.js (Para ejecutar en instancia EC2)
+// server.js (Para ejecutar en tu instancia EC2)
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -7,7 +7,9 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
-origin: "*",
+        // Permite conexiones desde cualquier origen.
+        // En un entorno de producción, deberías restringir esto a la URL de tu bucket S3.
+        origin: "*",
         methods: ["GET", "POST"]
     }
 });
@@ -21,7 +23,7 @@ const WIN_CONDITION = 4; // Cuatro en línea
 
 let waitingPlayers = []; // Lista de sockets esperando un oponente
 let activeGames = {};    // Objeto para almacenar los estados de los juegos activos
-                         // Key: gameId, Value: { board, players: {1: socketId, 2: socketId}, turn: 1|2, status: 'active' | 'gameOver' }
+                         // Key: gameId, Value: { board, players: {1: socketId, 2: socketId}, turn: 1|2 }
 
 // Función para crear un nuevo tablero vacío
 function createBoard() {
@@ -111,8 +113,8 @@ io.on('connection', (socket) => {
                 2: socket.id          // Jugador 2
             },
             turn: 1, // El Jugador 1 comienza
-            lastMove: null, // Almacenar el último movimiento para la verificación de victoria
-            status: 'active' // <--- NUEVO: Estado del juego
+            lastMove: null // Almacenar el último movimiento para la verificación de victoria
+            // REMOVIDO: Ya no necesitamos el estado 'status' aquí
         };
 
         // Asociar el gameId a ambos sockets para fácil referencia
@@ -140,107 +142,79 @@ io.on('connection', (socket) => {
 
     // Manejar el evento 'make_move'
     socket.on('make_move', (data) => {
-        const gameId = socket.gameId;
-        const game = activeGames[gameId];
+        try {
+            const gameId = socket.gameId;
+            const game = activeGames[gameId];
 
-        if (!game) {
-            socket.emit('invalid_move', 'No estás en un juego activo.');
-            return;
-        }
+            if (!game) {
+                socket.emit('invalid_move', 'No estás en un juego activo.');
+                return;
+            }
 
-        // <--- NUEVO: No permitir movimientos si el juego ha terminado
-        if (game.status === 'gameOver') {
-            socket.emit('invalid_move', 'El juego ha terminado. Por favor, reinicia para jugar de nuevo.');
-            return;
-        }
+            // REMOVIDO: Ya no necesitamos verificar game.status === 'gameOver' aquí
+            // porque el juego se eliminará al desconectarse un jugador.
 
-        const { col, player } = data;
+            const { col, player } = data;
 
-        // Verificar que sea el turno del jugador que envía el movimiento
-        if (game.turn !== player) {
-            socket.emit('invalid_move', 'No es tu turno.');
-            return;
-        }
+            // Verificar que sea el turno del jugador que envía el movimiento
+            if (game.turn !== player) {
+                socket.emit('invalid_move', 'No es tu turno.');
+                return;
+            }
 
-        // Verificar que el jugador que envía el movimiento sea el correcto para su número
-        if ((player === 1 && socket.id !== game.players[1]) || (player === 2 && socket.id !== game.players[2])) {
-            socket.emit('invalid_move', 'No eres el jugador correcto para este turno.');
-            return;
-        }
+            // Verificar que el jugador que envía el movimiento sea el correcto para su número
+            if ((player === 1 && socket.id !== game.players[1]) || (player === 2 && socket.id !== game.players[2])) {
+                socket.emit('invalid_move', 'No eres el jugador correcto para este turno.');
+                return;
+            }
 
-        // Validar el movimiento
-        if (!isValidMove(game.board, col)) {
-            socket.emit('invalid_move', 'Columna llena o inválida.');
-            return;
-        }
+            // Validar el movimiento
+            if (!isValidMove(game.board, col)) {
+                socket.emit('invalid_move', 'Columna llena o inválida.');
+                return;
+            }
 
-        // Realizar el movimiento
-        const moveResult = makeMove(game.board, col, player);
-        game.lastMove = moveResult; // Almacenar el último movimiento
+            // Realizar el movimiento
+            const moveResult = makeMove(game.board, col, player);
+            game.lastMove = moveResult; // Almacenar el último movimiento
 
-        // Verificar si hay un ganador
-        if (checkWin(game.board, player, game.lastMove)) {
-            console.log(`Jugador ${player} ganó el juego ${gameId}`);
-            game.status = 'gameOver'; // <--- CAMBIO: Marcar como terminado en lugar de eliminar
-            io.to(game.players[1]).emit('game_over', { board: game.board, winner: player });
-            io.to(game.players[2]).emit('game_over', { board: game.board, winner: player });
-            // No se elimina el juego aquí
-        } else if (isBoardFull(game.board)) {
-            console.log(`Juego ${gameId} terminó en empate.`);
-            game.status = 'gameOver'; // <--- CAMBIO: Marcar como terminado en lugar de eliminar
-            io.to(game.players[1]).emit('game_over', { board: game.board, winner: null }); // Empate
-            io.to(game.players[2]).emit('game_over', { board: game.board, winner: null }); // Empate
-            // No se elimina el juego aquí
-        } else {
-            // Cambiar el turno
-            game.turn = (player === 1) ? 2 : 1;
-            // Notificar a ambos jugadores sobre el movimiento
-            io.to(game.players[1]).emit('move_made', { board: game.board, nextPlayer: game.turn });
-            io.to(game.players[2]).emit('move_made', { board: game.board, nextPlayer: game.turn });
-        }
-    });
-
-    // Manejar la solicitud de reinicio del juego
-    socket.on('request_restart', () => {
-        const gameId = socket.gameId;
-        const game = activeGames[gameId];
-
-        if (game) {
-            // <--- CAMBIO: Solo reiniciar si el juego está en estado 'gameOver'
-            if (game.status === 'gameOver') {
-                // Reiniciar el tablero y el turno
-                game.board = createBoard();
-                game.turn = 1;
-                game.lastMove = null;
-                game.status = 'active'; // <--- NUEVO: Marcar el juego como activo de nuevo
-
-                // Notificar a ambos jugadores sobre el reinicio
-                io.to(game.players[1]).emit('restart_game', {
-                    playerNumber: 1, // Asumimos que el jugador 1 sigue siendo el 1
-                    startingPlayer: 1,
-                    board: game.board
-                });
-                io.to(game.players[2]).emit('restart_game', {
-                    playerNumber: 2, // Asumimos que el jugador 2 sigue siendo el 2
-                    startingPlayer: 1,
-                    board: game.board
-                });
-                console.log(`Juego ${gameId} reiniciado.`);
+            // Verificar si hay un ganador
+            if (checkWin(game.board, player, game.lastMove)) {
+                console.log(`Jugador ${player} ganó el juego ${gameId}`);
+                // REMOVIDO: Ya no marcamos status: 'gameOver'
+                io.to(game.players[1]).emit('game_over', { board: game.board, winner: player });
+                io.to(game.players[2]).emit('game_over', { board: game.board, winner: player });
+                // El juego se eliminará cuando un jugador se desconecte (recargue la página)
+            } else if (isBoardFull(game.board)) {
+                console.log(`Juego ${gameId} terminó en empate.`);
+                // REMOVIDO: Ya no marcamos status: 'gameOver'
+                io.to(game.players[1]).emit('game_over', { board: game.board, winner: null }); // Empate
+                io.to(game.players[2]).emit('game_over', { board: game.board, winner: null }); // Empate
+                // El juego se eliminará cuando un jugador se desconecte (recargue la página)
             } else {
-                // Si el juego no está en estado 'gameOver' (ej. ya está activo o en espera),
-                // no hacemos nada o enviamos un mensaje de error si es necesario.
-                socket.emit('invalid_move', 'El juego aún no ha terminado o ya se está reiniciando.');
+                // Cambiar el turno
+                game.turn = (player === 1) ? 2 : 1;
+                // Notificar a ambos jugadores sobre el movimiento
+                io.to(game.players[1]).emit('move_made', { board: game.board, nextPlayer: game.turn });
+                io.to(game.players[2]).emit('move_made', { board: game.board, nextPlayer: game.turn });
             }
-        } else {
-            // Si el juego ya no existe (ej. el oponente se desconectó y se eliminó el juego),
-            // el jugador se une a la cola de espera para una nueva partida.
-            if (!waitingPlayers.includes(socket)) {
-                waitingPlayers.push(socket);
-                console.log(`Jugador ${socket.id} añadido a la cola de espera para un nuevo juego.`);
-                socket.emit('connect', 'Esperando un nuevo oponente...'); // Re-emitir el evento de conexión para actualizar el estado del cliente
-            }
+        } catch (error) {
+            console.error(`Error en make_move para socket ${socket.id}:`, error);
+            socket.emit('server_error', 'Ocurrió un error en el servidor al realizar el movimiento.');
         }
     });
+
+    // REMOVIDO: Ya no necesitamos el manejador 'request_restart'
+    /*
+    socket.on('request_restart', () => {
+        try {
+            // ... (toda la lógica de reinicio eliminada)
+        } catch (error) {
+            console.error(`Error en request_restart para socket ${socket.id}:`, error);
+            socket.emit('server_error', 'Ocurrió un error en el servidor al intentar reiniciar el juego.');
+        }
+    });
+    */
 
     // Manejar la desconexión del usuario
     socket.on('disconnect', () => {
@@ -256,10 +230,11 @@ io.on('connection', (socket) => {
             const opponentSocketId = (socket.id === game.players[1]) ? game.players[2] : game.players[1];
 
             if (opponentSocketId) {
+                // Notificar al oponente que su compañero se desconectó
                 io.to(opponentSocketId).emit('opponent_disconnected');
                 console.log(`Oponente ${socket.id} desconectado en el juego ${gameId}. Notificando a ${opponentSocketId}.`);
             }
-            // <--- CAMBIO: Ahora sí eliminamos el juego solo cuando un jugador se desconecta
+            // Ahora sí eliminamos el juego solo cuando un jugador se desconecta
             delete activeGames[gameId];
             console.log(`Juego ${gameId} eliminado debido a desconexión.`);
         }
