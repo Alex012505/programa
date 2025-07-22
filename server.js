@@ -1,4 +1,4 @@
-// server.js (Para ejecutar en instancia EC2)
+// server.js (Para ejecutar en tu instancia EC2)
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -7,8 +7,6 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
-        // Permite conexiones desde cualquier origen.
-        // En un entorno de producción, deberías restringir esto a la URL de tu bucket S3.
         origin: "*",
         methods: ["GET", "POST"]
     }
@@ -141,7 +139,7 @@ io.on('connection', (socket) => {
 
     // Manejar el evento 'make_move'
     socket.on('make_move', (data) => {
-        try {
+        try { // Añadido try-catch para atrapar errores y evitar caídas del proceso
             const gameId = socket.gameId;
             const game = activeGames[gameId];
 
@@ -178,11 +176,13 @@ io.on('connection', (socket) => {
             if (checkWin(game.board, player, game.lastMove)) {
                 console.log(`Jugador ${player} ganó el juego ${gameId}`);
                 io.to(game.players[1]).emit('game_over', { board: game.board, winner: player });
-                io.to(game.players[2]).emit('game_over', { board: game.board, winner: null }); // Empate
+                io.to(game.players[2]).emit('game_over', { board: game.board, winner: player });
+                delete activeGames[gameId]; // <--- El juego se elimina aquí al terminar
             } else if (isBoardFull(game.board)) {
                 console.log(`Juego ${gameId} terminó en empate.`);
                 io.to(game.players[1]).emit('game_over', { board: game.board, winner: null }); // Empate
                 io.to(game.players[2]).emit('game_over', { board: game.board, winner: null }); // Empate
+                delete activeGames[gameId]; // <--- El juego se elimina aquí al terminar
             } else {
                 // Cambiar el turno
                 game.turn = (player === 1) ? 2 : 1;
@@ -195,6 +195,8 @@ io.on('connection', (socket) => {
             socket.emit('server_error', 'Ocurrió un error en el servidor al realizar el movimiento.');
         }
     });
+
+    // REMOVIDO: Ya no hay manejador para 'request_restart'
 
     // Manejar la desconexión del usuario
     socket.on('disconnect', () => {
@@ -210,11 +212,10 @@ io.on('connection', (socket) => {
             const opponentSocketId = (socket.id === game.players[1]) ? game.players[2] : game.players[1];
 
             if (opponentSocketId) {
-                // Notificar al oponente que su compañero se desconectó
                 io.to(opponentSocketId).emit('opponent_disconnected');
                 console.log(`Oponente ${socket.id} desconectado en el juego ${gameId}. Notificando a ${opponentSocketId}.`);
             }
-            // Eliminar el juego cuando un jugador se desconecta
+            // El juego se elimina también al desconectarse un jugador
             delete activeGames[gameId];
             console.log(`Juego ${gameId} eliminado debido a desconexión.`);
         }
